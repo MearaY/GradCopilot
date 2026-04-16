@@ -17,24 +17,10 @@
 <p>
   <a href="#快速开始">快速开始</a> •
   <a href="#功能特性">功能特性</a> •
-  <a href="#项目架构">项目架构</a> •
-  <a href="#运行说明">运行说明</a> •
+  <a href="#项目架构">项目架构</a>
 </p>
 
 </div>
-
----
-
-## 目录
-
-- [功能特性](#功能特性)
-- [项目架构](#项目架构)
-- [快速开始](#快速开始)
-- [配置环境](#配置环境)
-- [运行方式](#运行方式)
-- [使用指南](#使用指南)
-- [API 文档](#api-文档)
-- [许可证](#许可证)
 
 ---
 
@@ -137,9 +123,9 @@ streamlit run streamlit_app.py
 ```bash
 uvicorn src.app:app --port 8000 --reload
 ```
-
-<img src="./assets/01.png" alt="01" style="zoom: 50%;" />
-
+<p align="center">
+<img src="./assets/01.png" alt="01" width="300" />
+</p>
 启动前端（新终端）:
 
 ```bash
@@ -227,7 +213,9 @@ python src/main.py
 - 可选: 设置日期范围
 - 点击「搜索论文」
 
-<img src="./assets/05.png" alt="05" style="zoom: 33%;" /><img src="./assets/06.png" alt="06" style="zoom:50%;" />
+<p align="center">
+<img src="./assets/05.png" alt="05" width="220" /><img src="./assets/06.png" alt="06" width="300" />
+</p>
 
 ### 3. 下载论文
 
@@ -235,35 +223,43 @@ python src/main.py
 - 勾选要下载的论文
 - 点击「下载选中的论文」
 
-<img src="./assets/07.png" alt="07" style="zoom:50%;" /><img src="./assets/08.png" alt="08" style="zoom:33%;" />
+<p align="center">
+<img src="./assets/07.png" alt="07" width="210" /><img src="./assets/08.png" alt="08" width="300" />
+</p>
 
 ### 4. 构建知识库
 
 - 下载论文后，点击「构建知识库」
 - 自动构建并加载向量数据库
 
-<img src="./assets/09.png" alt="09" style="zoom: 33%;" />
+<p align="center">
+<img src="./assets/09.png" alt="09" width="300" />
+</p>
 
 ### 5. 选择模型
 
 - 在聊天区域右上角选择模型
 - 支持 Qwen / Gemini 切换
-
-<img src="./assets/10.png" alt="10" style="zoom:33%;" />
-
+<p align="center">
+<img src="./assets/10.png" alt="10" width="300" />
+</p>
 ### 6. 开始问答
 
 - 在底部输入框输入问题
 - 等待 AI 回答
 - 查看参考来源
 
-<img src="./assets/11.png" alt="11" style="zoom:50%;" />
+<p align="center">
+<img src="./assets/11.png" alt="11" width="300" />
+</p>
 
 ---
 
 ## API 文档
 
 ### 核心 API 端点
+
+<div align="center">
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
@@ -274,12 +270,17 @@ python src/main.py
 | `/api/knowledge/build` | POST | 构建知识库 |
 | `/api/query` | POST | 查询知识库 |
 | `...` | `...` | 更多接口详见 API 文档 |
+</div>
 
 ---
 
 **后端请求过程**
 
-![12](./assets/12.png)
+<p align="center">
+  
+<img src="./assets/12.png" alt="11"/>
+
+</p>
 
 ## 许可证
 
