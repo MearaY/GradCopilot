@@ -1,0 +1,28 @@
+# FastAPI Backend Dependencies
+fastapi==0.135.1
+uvicorn[standard]==0.41.0
+pydantic==2.12.5
+python-multipart==0.0.12
+
+# Streamlit Frontend Dependencies
+streamlit==1.56.0
+requests==2.32.5
+
+# LangChain and RAG Dependencies
+langchain==1.2.8
+langchain-openai==1.1.7
+langchain-community==0.4.1
+faiss-cpu==1.13.0
+openai==2.16.0
+
+# PDF Processing
+pymupdf==1.27.2.2
+
+# arXiv Search
+arxiv==2.4.1
+
+# Environment Variables
+python-dotenv==1.2.1
+
+# Utilities
+python-dateutil==2.9.0.post0
