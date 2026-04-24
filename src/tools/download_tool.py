@@ -1,28 +1,112 @@
 """
-Paper Download Tool - Works with search_agent metadata structure.
+M-10: 论文下载工具。
+
+对外入口：run(query, session_id)
+按 papers/{session_id}/ 分目录存储 PDF。
+支持逐个下载、重试机制（最多 3 次）和等待限流。
 """
-import sys
-from pathlib import Path
-
-current_file = Path(__file__).resolve()
-project_root = current_file.parent.parent.parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
-
-from typing import List, Optional, Dict, Any
-import requests
-from langchain_core.tools import tool
-from pydantic import BaseModel, Field, ConfigDict
-import arxiv
 import re
 import time
+import logging
+from pathlib import Path
+from typing import List, Optional, Dict, Any
+
+import arxiv
+import requests
+from pydantic import BaseModel, Field, ConfigDict
 
 from src.utils.log_utils import setup_logger
 
 logger = setup_logger(__name__)
 
-DEFAULT_DOWNLOAD_DIR = Path("data")
+# 论文存储根目录，按 {session_id} 分子目录存储
+_PAPERS_ROOT = Path("papers")
 DOWNLOAD_DELAY_SECONDS = 1.0
+
+
+def run(query: str, session_id: str) -> dict:
+    """
+    M-10 同步下载入口，供 AgentExecutor 调用。
+
+    从 query 中提取 paper_id 列表并下载到 papers/{session_id}/。
+    query 格式：逗号或空格分隔的 arXiv ID，如 "2312.01234 2401.00001"。
+
+    Args:
+        query:      逗号或空格分隔的 arXiv 论文 ID
+        session_id: 会话 ID，决定下载目录
+
+    Returns:
+        dict: {"downloaded": list[str], "failed": list[str]}
+    """
+    import re as _re
+    paper_ids = [p.strip() for p in _re.split(r"[,\s]+", query) if p.strip()]
+    return download_by_ids(paper_ids=paper_ids, session_id=session_id)
+
+
+def download_by_ids(paper_ids: list[str], session_id: str) -> dict:
+    """
+    按 paper_id 列表下载论文到 papers/{session_id}/。
+
+    Args:
+        paper_ids:  arXiv 论文 ID 列表，单次请求最多 20 个
+        session_id: 会话 ID
+
+    Returns:
+        dict: {"downloaded": list[str], "failed": list[str]}
+    """
+    paper_ids = paper_ids[:20]  # 按接口契约，单次请求最多 20 篇
+    target_dir = _PAPERS_ROOT / session_id
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    downloaded: list[str] = []
+    failed: list[str] = []
+
+    for i, paper_id in enumerate(paper_ids):
+        try:
+            filepath = target_dir / f"{paper_id.replace('/', '_')}.pdf"
+            if filepath.exists():
+                logger.info(f"DownloadTool: 已存在 {filepath}，跳过")
+                downloaded.append(paper_id)
+                continue
+
+            pdf_url = f"https://arxiv.org/pdf/{paper_id}.pdf"
+            success = _download_pdf(pdf_url, filepath)
+            if success:
+                downloaded.append(paper_id)
+            else:
+                failed.append(paper_id)
+
+            if i < len(paper_ids) - 1:
+                time.sleep(DOWNLOAD_DELAY_SECONDS)
+
+        except Exception as e:
+            logger.error(f"DownloadTool: paper_id={paper_id} error={e}")
+            failed.append(paper_id)
+
+    logger.info(
+        f"DownloadTool: session={session_id} downloaded={len(downloaded)} failed={len(failed)}"
+    )
+    return {"downloaded": downloaded, "failed": failed}
+
+
+def _download_pdf(pdf_url: str, filepath: Path, max_retries: int = 3) -> bool:
+    """从 URL 下载 PDF，最多重试 max_retries 次。"""
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(pdf_url, stream=True, timeout=30)
+            resp.raise_for_status()
+            with open(filepath, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            logger.info(f"DownloadTool: 下载成功 {filepath}")
+            return True
+        except Exception as e:
+            logger.warning(f"DownloadTool: 下载失败 attempt={attempt+1} url={pdf_url} error={e}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+    return False
+
+
 
 
 class PaperMetadata(BaseModel):

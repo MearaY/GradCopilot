@@ -1,5 +1,9 @@
 """
-arXiv Paper Search Tool
+M-09: arXiv 论文搜索工具。
+
+对外入口：run(query, session_id, max_results, start_date, end_date)
+返回符合 PaperMeta 数据字段定义的论文列表。
+支持服务端日期过滤（submittedDate）和客户端允较过滤，避免 HTTP 429 错误。
 """
 from typing import List, Optional, Dict, Any, Union
 from langchain_core.tools import tool
@@ -9,6 +13,159 @@ import arxiv
 from datetime import datetime
 
 logger = setup_logger(__name__)
+
+
+def run(
+    query: str,
+    session_id: str,
+    max_results: int = 10,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> dict:
+    """
+    M-09 同步搜索入口，供 AgentExecutor 调用。
+
+    Args:
+        query:       搜索关键词（自然语言，将按空格拆分为 terms）
+        session_id:  会话 ID（透传，用于日志）
+        max_results: 最大返回数量，范围 1-50
+        start_date:  日期过滤起始，格式 YYYY-MM-DD，None 表示不限
+        end_date:    日期过滤截止，格式 YYYY-MM-DD，None 表示不限
+
+    Returns:
+        dict: {"papers": list[PaperMeta], "total": int}
+        PaperMeta 字段：paper_id, title, authors, abstract, published_date, pdf_url, arxiv_url
+    """
+    max_results = max(1, min(max_results, 50))  # 限制返回数量范围 1-50
+    terms = [t.strip() for t in query.split() if t.strip()] or [query]
+
+    try:
+        # 构造关键词部分
+        keyword_parts = [f'all:"{term}"' for term in terms]
+        keyword_query = " OR ".join(keyword_parts)
+
+        # 拼接 arXiv 原生日期过滤，使用服务端 submittedDate 过滤提升效率，减少客户端截断
+        date_filter = _build_date_filter(start_date, end_date)
+        if date_filter:
+            search_query = f"({keyword_query}) AND {date_filter}"
+        else:
+            search_query = keyword_query
+
+        # 始终按相关度排序；日期过滤是查询条件，与排序无关
+        sort_by = arxiv.SortCriterion.Relevance
+
+        # 有日期过滤时适当扩大报单量（应对个别日期边界存在偏差）
+        fetch_count = min(max_results * 3, 100) if date_filter else max_results
+
+        logger.info(
+            f"ArxivSearchTool: session={session_id} query={search_query!r} "
+            f"max={max_results} fetch={fetch_count}"
+        )
+
+        # 使用显式 Client 控制 page_size，避免默认 100 触发 429
+        client = arxiv.Client(
+            page_size=fetch_count,
+            delay_seconds=3.0,
+            num_retries=2,
+        )
+        search = arxiv.Search(
+            query=search_query,
+            max_results=fetch_count,
+            sort_by=sort_by,
+            sort_order=arxiv.SortOrder.Descending,
+        )
+        results = list(client.results(search))
+
+        # 客户端兑底过滤（应对服务端返回边界外数据的极少情况）
+        if date_filter:
+            results = _filter_by_date(results, start_date, end_date)
+
+        # 截断到用户请求的数量
+        results = results[:max_results]
+
+        papers = [_to_paper_meta(r) for r in results]
+        logger.info(f"ArxivSearchTool: found={len(papers)} session={session_id}")
+        return {"papers": papers, "total": len(papers)}
+
+    except Exception as e:
+        logger.error(f"ArxivSearchTool: 失败 session={session_id} error={e}")
+        raise RuntimeError(f"arXiv 搜索失败: {e}") from e
+
+
+def _build_date_filter(start_date: str | None, end_date: str | None) -> str | None:
+    """
+    构造 arXiv 原生 submittedDate 过滤查询字符串。
+
+    arXiv API 支持：submittedDate:[YYYYMMDD0000 TO YYYYMMDD2359]
+    服务端过滤效率远高于客户端按字段过滤。
+    """
+    if not (start_date or end_date):
+        return None
+
+    def _fmt(d: str | None, default: str) -> str:
+        if not d:
+            return default
+        try:
+            return datetime.strptime(d, "%Y-%m-%d").strftime("%Y%m%d")
+        except ValueError:
+            return default
+
+    s = _fmt(start_date, "19900101")
+    e = _fmt(end_date, datetime.now().strftime("%Y%m%d"))
+    return f"submittedDate:[{s}0000 TO {e}2359]"
+
+
+def _to_paper_meta(result: "arxiv.Result") -> dict:
+    """
+    将 arxiv.Result 转为 PaperMeta 格式字典。
+    PaperMeta 字段：paper_id, title, authors, abstract, published_date, pdf_url, arxiv_url。
+    """
+    published_date = None
+    if result.published:
+        published_date = result.published.strftime("%Y-%m-%d")
+
+    return {
+        "paper_id": result.get_short_id(),
+        "title": result.title,
+        "authors": [a.name for a in result.authors],
+        "abstract": result.summary or None,
+        "published_date": published_date,
+        "pdf_url": result.pdf_url or "",
+        "arxiv_url": result.entry_id or "",
+    }
+
+
+def _filter_by_date(
+    results: list,
+    start_date: str | None,
+    end_date: str | None,
+) -> list:
+    """按 YYYY-MM-DD 格式过滤论文发表日期范围。"""
+    def parse_date(d: str | None):
+        if not d:
+            return None
+        try:
+            return datetime.strptime(d, "%Y-%m-%d").date()
+        except ValueError:
+            return None
+
+    start = parse_date(start_date)
+    end = parse_date(end_date)
+
+    filtered = []
+    for r in results:
+        if not r.published:
+            filtered.append(r)
+            continue
+        pub_date = r.published.date()
+        if start and pub_date < start:
+            continue
+        if end and pub_date > end:
+            continue
+        filtered.append(r)
+    return filtered
+
+
 
 
 class ArxivSearchInput(BaseModel):
