@@ -56,3 +56,17 @@ Thumbs.db
 
 # Jupyter
 .ipynb_checkpoints/
+
+data/redis/*
+
+data/postgres/*
+
+data/ollama/*
+
+!data/**/.gitkeep
+
+.streamlit/
+
+.pytest_cache/
+
+.coverage

@@ -12,6 +12,7 @@ requests==2.32.5
 langchain==1.2.8
 langchain-openai==1.1.7
 langchain-community==0.4.1
+langchain-text-splitters>=0.3.0  # M-11 build_knowledge_tool
 faiss-cpu==1.13.0
 openai==2.16.0
 
@@ -26,3 +27,13 @@ python-dotenv==1.2.1
 
 # Utilities
 python-dateutil==2.9.0.post0
+
+# ── Database & Memory ──────────────────────────────
+redis>=5.0.0                  # M-06 SessionMemory (Redis 客户端)
+sqlalchemy>=2.0.0             # M-07 VectorStore ORM
+psycopg2-binary               # PostgreSQL 驱动
+pgvector                      # pgvector Python 绑定（VECTOR 类型支持）
+
+# ── Testing ────────────────────────────────────────
+pytest>=8.0.0
+pytest-mock>=3.0.0
