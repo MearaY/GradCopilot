@@ -1,6 +1,4 @@
 # docker-compose.yml — GradCopilot Phase 2
-# version 属性已废弃，已移除 [REF: system_design.md#7.1]
-
 services:
   ollama:
     image: ollama/ollama:latest

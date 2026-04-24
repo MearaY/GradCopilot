@@ -1,6 +1,6 @@
 @echo off
 echo ========================================
-echo 论文知识库问答系统 - FastAPI 后端
+echo GradCopilot - Agentic RAG 学术助手 (FastAPI 后端)
 echo ========================================
 echo.
 echo 正在启动 FastAPI 服务器...
@@ -11,6 +11,6 @@ echo 按 Ctrl+C 停止服务器
 echo.
 
 cd /d "%~dp0"
-python -m uvicorn src.app:app --host 0.0.0.0 --port 8000 --reload
+uvicorn src.app:app --host 0.0.0.0 --port 8000 --reload
 
 pause
