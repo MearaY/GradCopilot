@@ -1,14 +1,51 @@
-# docker-compose.yml — GradCopilot Phase 2
+version: '3.8'
+
 services:
+  # -----------------------------
+  # 1. 基础设施层
+  # -----------------------------
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: gradcopilot-postgres
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - ./data/docker/postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d gradcopilot" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: gradcopilot-redis
+    restart: always
+    volumes:
+      - ./data/docker/redis:/data
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   ollama:
     image: ollama/ollama:latest
-    container_name: GradCopilot-ollama
+    container_name: gradcopilot-ollama
+    restart: always
+    volumes:
+      - ./data/docker/ollama:/root/.ollama
     ports:
       - "11434:11434"
-    volumes:
-      - ./data/ollama:/root/.ollama
-    restart: unless-stopped
-    # 可以在此添加 GPU 支持的配置
+    # 若宿主机存在 NVIDIA GPU 并配置了 nvidia-container-toolkit，可取消下方注释
     # deploy:
     #   resources:
     #     reservations:
@@ -17,27 +54,60 @@ services:
     #           count: 1
     #           capabilities: [gpu]
 
-  redis:
-    image: redis:7-alpine
-    container_name: GradCopilot-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - ./data/redis:/data
-    command: redis-server --appendonly yes
-    restart: unless-stopped
-
-  postgres:
-    image: pgvector/pgvector:pg16
-    container_name: GradCopilot-postgres
+    # -----------------------------
+    # 2. 核心业务层
+    # -----------------------------
+  fastapi:
+    build:
+      context: .
+      dockerfile: docker/fastapi/Dockerfile
+    container_name: gradcopilot-api
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-gradcopilot}
-      # 指定 pgdata 子目录避免 Windows 挂载点 initdb 失败
-      PGDATA: /var/lib/postgresql/data/pgdata
-    ports:
-      - "5432:5432"
+      - POSTGRES_URL=postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/gradcopilot
+      - REDIS_URL=redis://redis:6379/0
+      - OLLAMA_BASE_URL=http://ollama:11434
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
-    restart: unless-stopped
+      - ./config.local.json:/app/config.local.json
+      - ./papers:/app/papers
+      - ./logs:/app/logs
+      - ./vector_db:/app/vector_db
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/api/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  streamlit:
+    build:
+      context: .
+      dockerfile: docker/streamlit/Dockerfile
+    container_name: gradcopilot-web
+    restart: always
+    depends_on:
+      fastapi:
+        condition: service_healthy
+    environment:
+      # 指定给前端：后端的网络访问地址
+      - BACKEND_URL=http://fastapi:8000
+    ports:
+      - "8501:8501"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8501/_stcore/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+networks:
+  default:
+    name: gradcopilot-net
+    driver: bridge

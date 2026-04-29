@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # -----------------------------
+  # 基础设施层 (供本地 Python 开发使用)
+  # -----------------------------
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: gradcopilot-postgres-infra
+    restart: always
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-gradcopilot}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - ./data/infra/postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d gradcopilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: gradcopilot-redis-infra
+    restart: always
+    volumes:
+      - ./data/infra/redis:/data
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: gradcopilot-ollama-infra
+    restart: always
+    volumes:
+      - ./data/infra/ollama:/root/.ollama
+    ports:
+      - "11434:11434"
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+networks:
+  default:
+    name: gradcopilot-net-infra
+    driver: bridge

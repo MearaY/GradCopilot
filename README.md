@@ -107,54 +107,103 @@ docker-compose up -d
 python migrations/run_migration.py
 ```
 
-### 3. 启动应用服务
+### 3. 一键启动 GradCopilot 服务（全栈容器化）
 
-基础设施就绪后，您可以分别拉起项目的后端核心与交互前端：
+本项目使用 Docker Compose 提供了一键式的零配置拉起部署。**这是推荐的最简单、最安全的启动方式**。
 
-**步骤 1：启动后端业务 API**
+**步骤 1：复制环境配置与安全防漏初始化**
 
 ```bash
+# 复制基础设施密码配置模板
+cp env.example.txt .env
+
+# 初始化个人的模型及密钥配置空文件
+python -c "open('config.local.json', 'w', encoding='utf-8').write('{}')"
+```
+> **安全说明**：为了防止 API Key 意外泄露，`.env` 和 `config.local.json` 以及所有个人运行产生的数据（论文、日志、向量库），均已被严格加入 `.gitignore`。
+
+#### 方案 A：全栈一键部署 (推荐使用)
+
+只需 Docker，无需配置本地 Python 环境，适合开箱即用的体验。
+
+**1. 全栈拉起与数据库迁移**
+```bash
+# 构建并后台拉起包括前后端与数据库在内的5个服务
+docker compose build
+docker compose up -d
+
+# 等待约 10 秒服务就绪后，执行数据库初始化
+docker compose exec fastapi python migrations/run_migration.py
+```
+
+**2. 配置个人 API Key (首次必需)**
+
+无需手动修改文件，您可直接利用容器内的 CLI 环境快速初始化配置（这将被安全地持久化到宿主机上）：
+```bash
+docker compose exec -it fastapi python src/cli.py config init
+```
+*(如果您更喜欢图形化界面，也可以跳过此步骤，直接在下一步进入 Web UI 面板中配置)*
+
+**3. 开始使用**
+- **Web 界面**：浏览器访问 [http://localhost:8501](http://localhost:8501)
+- **终端 CLI**：执行 `docker compose exec -it fastapi python src/cli.py`
+
+---
+
+#### 方案 B：本地开发调试模式 (适合开发者)
+
+仅将数据库等中间件容器化，前后端代码保留在宿主机运行，方便使用 IDE 进行断点调试与热重载。
+> [!TIP]
+> 纯基础设施环境的数据将挂载至物理隔离的 `./data/infra/` 目录，与全栈环境的 `./data/docker/` 目录严格区分，保证您用两种方式启动都不会发生数据与配置冲突。
+
+**1. 仅拉起基础设施层 (PostgreSQL, Redis, Ollama)**
+```bash
+docker compose -f docker-compose.infra.yml up -d
+```
+
+**2. 本地执行数据库迁移与拉起后端**
+```bash
+python migrations/run_migration.py
 uvicorn src.app:app --host 0.0.0.0 --port 8000
 ```
-> 后端启动后，请访问 `http://localhost:8000/docs` 查看并测试由 FastAPI 自动生成的 OpenAPI 接口规范。
 
-![phase2-backend-start](./assets/phase2-backend-start.png)
-
-**步骤 2：初始化自定义配置（可选）**
-
-得益于最新的运行时配置系统，您现在无需手动编辑 `.env` 文件。保持后端运行，在新的终端窗口中执行以下命令，即可交互式配置您的 API 密钥及模型参数：
-
+**3. 本地使用与调试前端 (需新开终端)**
 ```bash
-python src/cli.py config init
-```
-
-> **提示**：配置将安全地保存在本地 `config.local.json` 中，优先生效且不会被提交到版本库。您也可以随时使用 `python src/cli.py config show` 查看当前生效配置，或在启动 Web UI 后进入「⚙️ 设置」面板以图形化方式修改。
-
-**步骤 3：启动前端应用 (二选一)**
-
-*选项 A：终端开发客户端 (CLI)*
-
-```bash
-# 开启全新终端窗口执行
+# 执行 CLI (首次请执行: python src/cli.py config init)
 python src/cli.py
+
+# 或开启 Web 面板
+streamlit run streamlit_app.py
 ```
 
-![phase2-frontend-CLI](./assets/phase2-frontend-CLI.png)
+#### 常用管理与维护命令
 
-*选项 B：Web UI*
+> [!WARNING]
+> **端口占用警告**：请勿同时启动「方案 A」与「方案 B」！因为两者都会绑定宿主机的 `5432` 等基础端口。在切换部署方案前，请务必先执行 `down` 命令将当前环境关闭。如果您确实需要双线并行，请自行修改其中一份配置的对外暴露端口。
 
+**1. 查看容器运行状态**
 ```bash
-# 开启全新终端窗口执行
-streamlit run streamlit_app.py
+# 查看全栈模式容器
+docker compose ps
+
+# 查看本地开发模式容器
+docker compose -f docker-compose.infra.yml ps
+```
+
+**2. 停止环境并回收容器 (您的数据依然会被安全保留在挂载卷中)**
+```bash
+# 停止全栈模式
+docker compose down
+
+# 停止本地开发模式
+docker compose -f docker-compose.infra.yml down
 ```
 
 ![phase2-Web-UI](./assets/phase2-Web-UI.png)
 
----
+## 工程运行演示
 
-## 📸 工程运行演示
-
-### 🖥️ 终端 CLI 交互效果
+### 终端 CLI 交互效果
 针对全栈开发者的调试与沉浸式体验打造的交互式终端，实时反馈各层工具调用状态与底层数据流向。
 
 **通过 /help 查看支持命令**
