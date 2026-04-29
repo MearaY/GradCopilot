@@ -38,13 +38,14 @@ from components.sidebar import render_sidebar
 from components.chat_panel import render_chat
 from components.search_panel import render_search
 from components.knowledge_panel import render_knowledge
+from components.settings_panel import render_settings
 
 # ── 左侧边栏 ─────────────────────────────────────────────────
 with st.sidebar:
     render_sidebar()
 
 # ── 主内容区（Tab 切换） ─────────────────────────────────────
-tab1, tab2, tab3 = st.tabs(["💬 聊天", "🔍 论文搜索", "📦 知识库"])
+tab1, tab2, tab3, tab4 = st.tabs(["💬 聊天", "🔍 论文搜索", "📦 知识库", "⚙️ 设置"])
 
 with tab1:
     render_chat()
@@ -54,3 +55,6 @@ with tab2:
 
 with tab3:
     render_knowledge()
+
+with tab4:
+    render_settings()

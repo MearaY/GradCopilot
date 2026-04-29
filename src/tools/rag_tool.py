@@ -5,16 +5,13 @@ M-12: RAG 检索工具。
 支持可选的 paper_ids 过滤，将检索范围限定到情景上下文中指定的论文。
 """
 import logging
-import os
 
 from openai import OpenAI
 
 from src.modules.vector_store import search
+from src.utils.config_loader import get as config_get
 
 logger = logging.getLogger(__name__)
-
-# Embedding 模型，默认使用 text-embedding-3-small，支持环境变量覆盖
-_EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
 
 
 def run(query: str, session_id: str, top_k: int = 5, paper_ids: list[str] | None = None) -> dict:
@@ -78,8 +75,8 @@ def _embed_query(text: str) -> list[float]:
         向量维度 1536，与 paper_chunks 表的 embedding VECTOR(1536) 字段匹配。
     """
     client = OpenAI(
-        api_key=os.environ["API_KEY"],
-        base_url=os.environ["BASE_URL"],
+        api_key=config_get("api_key"),
+        base_url=config_get("base_url"),
     )
-    resp = client.embeddings.create(model=_EMBEDDING_MODEL, input=[text])
+    resp = client.embeddings.create(model=config_get("embedding_model"), input=[text])
     return resp.data[0].embedding

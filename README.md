@@ -120,7 +120,17 @@ uvicorn src.app:app --host 0.0.0.0 --port 8000
 
 ![phase2-backend-start](./assets/phase2-backend-start.png)
 
-**步骤 2：启动前端应用 (二选一)**
+**步骤 2：初始化自定义配置（可选）**
+
+得益于最新的运行时配置系统，您现在无需手动编辑 `.env` 文件。保持后端运行，在新的终端窗口中执行以下命令，即可交互式配置您的 API 密钥及模型参数：
+
+```bash
+python src/cli.py config init
+```
+
+> **提示**：配置将安全地保存在本地 `config.local.json` 中，优先生效且不会被提交到版本库。您也可以随时使用 `python src/cli.py config show` 查看当前生效配置，或在启动 Web UI 后进入「⚙️ 设置」面板以图形化方式修改。
+
+**步骤 3：启动前端应用 (二选一)**
 
 *选项 A：终端开发客户端 (CLI)*
 

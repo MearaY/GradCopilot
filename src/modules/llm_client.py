@@ -8,8 +8,9 @@ M-08：统一 LLM 调用客户端。
 所有 LLM 调用必须通过此模块，禁止在其他模块直接实例化 LLM。
 """
 import logging
-import os
 import time
+
+from src.utils.config_loader import get as config_get
 
 from openai import OpenAI, APITimeoutError, APIConnectionError, APIStatusError
 
@@ -17,18 +18,15 @@ from src.utils.llm_logger import log_llm_call
 
 logger = logging.getLogger(__name__)
 
-# 超时设置（秒），嶗超时抛出 TimeoutError
-_TIMEOUT_SECONDS = 30
-
-# 默认模型，支持环境变量 MODEL_NAME 覆盖
-_DEFAULT_MODEL = os.environ.get("MODEL_NAME", "gpt-5-nano")
+# 超时设置（秒），超时抛出 TimeoutError
+_TIMEOUT_SECONDS = 60
 
 
 def _get_openai_client() -> OpenAI:
     """构造 OpenAI 兼容客户端，使用 BASE_URL + API_KEY。"""
     return OpenAI(
-        api_key=os.environ["API_KEY"],
-        base_url=os.environ["BASE_URL"],
+        api_key=config_get("api_key"),
+        base_url=config_get("base_url"),
         timeout=_TIMEOUT_SECONDS,
     )
 
@@ -38,7 +36,7 @@ def _get_ollama_client() -> OpenAI:
     构造 Ollama 客户端（使用 OpenAI 兼容接口）。
     Ollama 无需真实 API Key，使用占位符字符串。
     """
-    ollama_base = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+    ollama_base = config_get("ollama_base_url")
     return OpenAI(
         api_key="ollama",  # Ollama 不需要真实 key
         base_url=f"{ollama_base}/v1",
@@ -82,7 +80,7 @@ def call_llm(
         返回字段：content/model/usage(prompt_tokens/completion_tokens/total_tokens)。
         崧异常：TimeoutError(超时)/RuntimeError(调用失败)。
     """
-    resolved_model = model or _DEFAULT_MODEL
+    resolved_model = model or config_get("model_name")
 
     # 判断后端类型：Ollama model 以 "ollama:" 开头
     if resolved_model.startswith("ollama:"):

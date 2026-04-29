@@ -5,8 +5,9 @@ M-11: 知识库构建工具。
 支持按文件逐一处理，分批 embedding 调用（每批 100 条），降低内存压力和 API 请求次数。
 """
 import logging
-import os
 from pathlib import Path
+
+from src.utils.config_loader import get as config_get
 
 import fitz  # PyMuPDF，用于 PDF 文本提取
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -22,9 +23,6 @@ _PAPERS_ROOT = Path("papers")
 # 文本切分参数（chunk_size=500 字符，overlap=50 字符）
 _CHUNK_SIZE = 500
 _CHUNK_OVERLAP = 50
-
-# Embedding 模型，默认使用 text-embedding-3-small，支持环境变量覆盖
-_EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
 
 # 每批 embedding 请求的最大文本数
 _EMBED_BATCH_SIZE = 100
@@ -148,14 +146,15 @@ def _generate_embeddings(texts: list[str]) -> list[list[float]]:
         list[list[float]]: 与 texts 一一对应的向量列表（维度 1536，text-embedding-3-small）
     """
     client = OpenAI(
-        api_key=os.environ["API_KEY"],
-        base_url=os.environ["BASE_URL"],
+        api_key=config_get("api_key"),
+        base_url=config_get("base_url"),
     )
+    embedding_model = config_get("embedding_model")
 
     all_embeddings: list[list[float]] = []
     for i in range(0, len(texts), _EMBED_BATCH_SIZE):
         batch = texts[i: i + _EMBED_BATCH_SIZE]
-        resp = client.embeddings.create(model=_EMBEDDING_MODEL, input=batch)
+        resp = client.embeddings.create(model=embedding_model, input=batch)
         batch_embeddings = [item.embedding for item in resp.data]
         all_embeddings.extend(batch_embeddings)
         logger.info(

@@ -1,16 +1,19 @@
 """
 GradCopilot FastAPI 主入口 — Phase 2 Agentic RAG
 
-接口列表（共 9 个）：
-  1. POST /api/agent/chat
-  2. GET  /api/sessions
-  3. POST /api/sessions/create
-  4. DELETE /api/sessions/{session_id}
-  5. GET  /api/sessions/{session_id}/history
-  6. POST /api/papers/search
-  7. POST /api/papers/download
-  8. POST /api/knowledge/build
-  9. GET  /api/health
+接口列表（共 12 个）：
+  1.  POST   /api/agent/chat
+  2.  GET    /api/sessions
+  3.  POST   /api/sessions/create
+  4.  DELETE /api/sessions/{session_id}
+  5.  GET    /api/sessions/{session_id}/history
+  6.  POST   /api/papers/search
+  7.  POST   /api/papers/download
+  8.  POST   /api/knowledge/build
+  9.  GET    /api/health
+  10. GET    /api/config
+  11. PUT    /api/config
+  12. DELETE /api/config
 """
 import asyncio
 import os
@@ -22,7 +25,7 @@ from typing import Optional
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 
 # ── 环境变量加载（最优先）─────────────────────────────────────
@@ -47,6 +50,12 @@ from src.modules.agent_executor import execute as agent_execute
 from src.modules.response_generator import generate as response_generate
 from src.modules.session_memory import get_history, clear_history, count_history
 from src.utils.errors import ErrorCode
+from src.utils.config_loader import (
+    get as config_get,
+    get_masked,
+    set as config_set,
+    reset as config_reset,
+)
 
 # ── FastAPI 实例 ──────────────────────────────────────────────
 app = FastAPI(
@@ -97,6 +106,23 @@ class DownloadRequest(BaseModel):
 class BuildKnowledgeRequest(BaseModel):
     """POST /api/knowledge/build 请求体。"""
     session_id: str = Field(..., min_length=1, description="会话 ID")
+
+
+class ConfigUpdateRequest(BaseModel):
+    """PUT /api/config 请求体，所有字段可选"""
+    api_key: Optional[str] = Field(default=None, max_length=512)
+    base_url: Optional[str] = Field(default=None)
+    model_name: Optional[str] = Field(default=None, max_length=128)
+    embedding_model: Optional[str] = Field(default=None, max_length=128)
+    ollama_base_url: Optional[str] = Field(default=None)
+    ollama_model: Optional[str] = Field(default=None, max_length=128)
+
+    @field_validator("base_url", "ollama_base_url", mode="before")
+    @classmethod
+    def validate_url(cls, v):
+        if v is not None and not (v.startswith("http://") or v.startswith("https://")):
+            raise ValueError("URL 必须以 http:// 或 https:// 开头")
+        return v
 
 
 # ============================================================
@@ -250,7 +276,7 @@ async def agent_chat(req: ChatRequest):
         "route": route,
         "tool_used": exec_result.get("tool_used"),
         "sources": gen_result.get("sources", []),
-        "model_used": gen_result.get("model_used", os.environ.get("MODEL_NAME", "gpt-5-nano")),
+        "model_used": gen_result.get("model_used", config_get("model_name")),
         "tokens_used": gen_result.get("tokens_used", 0),
     }
 
@@ -410,6 +436,30 @@ async def build_knowledge(req: BuildKnowledgeRequest):
         logger.error(f"build_knowledge 异常: {e}")
         _error_response(ErrorCode.INTERNAL_ERROR, str(e), 500)
 
+# ============================================================
+# 10-12. /api/config — 运行时配置管理
+# ============================================================
+
+@app.get("/api/config")
+async def get_config():
+    """GET /api/config — 读取当前脱敏配置（三层优先级解析后的最终值）。"""
+    return get_masked()
+
+
+@app.put("/api/config")
+async def update_config(req: ConfigUpdateRequest):
+    """PUT /api/config — 局部更新 config.local.json。"""
+    updates = req.model_dump(exclude_unset=True)
+    config_set(updates)
+    return {"success": True, "updated_fields": list(updates.keys())}
+
+
+@app.delete("/api/config")
+async def reset_config():
+    """DELETE /api/config — 清空 config.local.json，回退到 .env 和默认值。"""
+    config_reset()
+    return {"success": True, "message": "配置已重置为默认值"}
+
 
 # ============================================================
 # 9. GET /api/health — 健康检查
@@ -451,8 +501,8 @@ async def _check_llm_api() -> str:
         try:
             from openai import OpenAI
             client = OpenAI(
-                api_key=os.environ["API_KEY"],
-                base_url=os.environ["BASE_URL"],
+                api_key=config_get("api_key"),
+                base_url=config_get("base_url"),
                 timeout=3,
             )
             client.models.list()

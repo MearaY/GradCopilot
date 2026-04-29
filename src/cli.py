@@ -9,6 +9,8 @@ src/cli.py — GradCopilot Phase 2 CLI 模式。
     python src/cli.py --session <session_id>  # 使用指定会话
     python src/cli.py --base-url http://localhost:8000
 
+    python src/cli.py config                  # 运行时配置管理子命令
+
 命令（进入后输入 /help 查看）：
     /help           帮助
     /new [名称]     新建会话
@@ -17,6 +19,9 @@ src/cli.py — GradCopilot Phase 2 CLI 模式。
     /search <词>    搜索 arXiv 论文
     /download <n>   下载搜索结果第 n 篇（可逗号分隔多个）
     /build          构建向量知识库
+    /config show    查看当前生效配置
+    /config init    交互式引导配置
+    /config reset   重置配置为默认值
     /history        查看当前会话历史
     /delete         删除当前会话
     /quit           退出
@@ -372,12 +377,31 @@ class GradCopilotCLI:
   /download [序号]    下载搜索结果（序号逗号分隔，如 1,2,3）
   /build              构建/更新向量知识库
 
+  /config show        查看当前生效配置
+  /config init        交互式引导配置
+  /config reset       重置配置为默认值
+  （注意：设置具体项请退出后运行 python src/cli.py config set ...）
+
   /help               显示帮助
   /quit  /exit        退出
 
   {c('cyan', '直接输入')} 即为发送消息给 Agent
 {_hr()}
 """)
+
+    def cmd_config(self, arg: str):
+        """处理交互模式下的 /config 命令。"""
+        action = arg.strip().lower()
+        if action == "show":
+            _config_show(self.base)
+        elif action == "init":
+            _config_init(self.base)
+        elif action == "reset":
+            _config_reset(self.base)
+        elif action.startswith("set "):
+            print(c("yellow", "  在交互模式下不支持带参数的 set，请退出后运行外部命令：\n  python src/cli.py config set ..."))
+        else:
+            print(c("yellow", "  支持的配置命令：/config show | /config init | /config reset"))
 
     # ── REPL 主循环 ──────────────────────────────────────────
 
@@ -443,6 +467,7 @@ class GradCopilotCLI:
                     "search": lambda: self.cmd_search(arg),
                     "download": lambda: self.cmd_download(arg),
                     "build": lambda: self.cmd_build(),
+                    "config": lambda: self.cmd_config(arg),
                     "quit": None,
                     "exit": None,
                 }
@@ -469,11 +494,112 @@ class GradCopilotCLI:
                     print(c("red", f"  ✗ {e}"))
 
 
+# ── config 子命令函数 ────────────────────────────────────────────
+
+def _config_show(base_url: str) -> None:
+    """config show — 展示当前生效的脱敏配置（调用后端 GET /api/config）。"""
+    try:
+        data = _call("GET", f"{base_url}/api/config", timeout=DEFAULT_TIMEOUT)
+    except SystemExit:
+        return
+
+    source = data.get("source", {})
+    _SOURCE_LABEL = {"local": c("green", "local"), "env": c("cyan", "env"), "default": c("gray", "default")}
+
+    print(f"\n{c('bold', 'GradCopilot 当前生效配置')}")
+    print(_hr())
+
+    # api_key 特殊展示
+    api_key_preview = data.get("api_key_preview", "(未设置)")
+    api_key_set     = data.get("api_key_set", False)
+    src_label       = _SOURCE_LABEL.get(source.get("api_key", "default"), "")
+    status          = c("green", "✓ 已设置") if api_key_set else c("yellow", "✗ 未设置")
+    print(f"  {'api_key':<20} {api_key_preview:<30} [{src_label}]  {status}")
+
+    # 其余字段
+    fields = ["base_url", "model_name", "embedding_model", "ollama_base_url", "ollama_model"]
+    for field in fields:
+        val = data.get(field, "-")
+        src = _SOURCE_LABEL.get(source.get(field, "default"), "")
+        print(f"  {field:<20} {val:<30} [{src}]")
+
+    print()
+
+
+def _config_set(base_url: str, opts: dict) -> None:
+    """config set — 更新指定配置项（调用后端 PUT /api/config）。"""
+    # 过滤掉用户未传的参数（None 表示未指定）
+    updates = {k: v for k, v in opts.items() if v is not None}
+    if not updates:
+        print(c("yellow", "⚠  未指定任何配置项，请使用 --help 查看可用选项"))
+        return
+    try:
+        data = _call("PUT", f"{base_url}/api/config",
+                     timeout=DEFAULT_TIMEOUT, json=updates)
+    except SystemExit:
+        return
+    fields = data.get("updated_fields", [])
+    print(c("green", f"✓ 已更新：{', '.join(fields)}"))
+
+
+def _config_reset(base_url: str) -> None:
+    """config reset — 清空 config.local.json（调用后端 DELETE /api/config）。"""
+    confirm = input(c("yellow", "  确认重置所有配置为 .env 默认值？(y/N) ")).strip().lower()
+    if confirm != "y":
+        print("  已取消")
+        return
+    try:
+        _call("DELETE", f"{base_url}/api/config", timeout=DEFAULT_TIMEOUT)
+    except SystemExit:
+        return
+    print(c("green", "✓ 配置已重置，所有值回退到 .env 默认值"))
+
+
+def _config_init(base_url: str) -> None:
+    """config init — 交互式引导配置（新用户首次使用）。"""
+    # 先获取当前配置显示当前值
+    try:
+        current = _call("GET", f"{base_url}/api/config", timeout=DEFAULT_TIMEOUT)
+    except SystemExit:
+        return
+
+    print(f"\n{c('bold', '欢迎使用 GradCopilot！请配置您的 API 信息（直接回车跳过该项）：')}\n")
+
+    prompts = [
+        ("api_key",         "LLM API Key",       current.get("api_key_preview", "(未设置)")),
+        ("base_url",        "LLM Base URL",       current.get("base_url", "")),
+        ("model_name",      "LLM Model Name",     current.get("model_name", "")),
+        ("embedding_model", "Embedding Model",    current.get("embedding_model", "")),
+        ("ollama_base_url", "Ollama Base URL",     current.get("ollama_base_url", "")),
+        ("ollama_model",    "Ollama Model",        current.get("ollama_model", "")),
+    ]
+
+    updates: dict = {}
+    for key, label, cur_val in prompts:
+        val = input(f"  {label} {c('gray', f'[当前: {cur_val}]')}: ").strip()
+        if val:
+            updates[key] = val
+
+    if not updates:
+        print(c("gray", "\n  未做任何修改"))
+        return
+
+    try:
+        _call("PUT", f"{base_url}/api/config",
+              timeout=DEFAULT_TIMEOUT, json=updates)
+    except SystemExit:
+        return
+
+    print(c("green", "\n✅ 配置已保存到 config.local.json"))
+    print(c("gray",  "   运行 `python -m src.cli config show` 查看当前配置"))
+
+
 # ── 入口 ──────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(
-        description="GradCopilot Phase 2 CLI — Agentic RAG 学术研究助手"
+        description="GradCopilot CLI — Agentic RAG 学术研究助手",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--base-url",
@@ -485,9 +611,58 @@ def main():
         default=None,
         help="启动时加载的 session_id（可选）",
     )
-    args = parser.parse_args()
 
-    cli = GradCopilotCLI(base_url=args.base_url, initial_session=args.session)
+    subparsers = parser.add_subparsers(dest="command", metavar="command")
+
+    # ── config 子命令组 ──────────────────────────────────────
+    config_parser = subparsers.add_parser("config", help="运行时配置管理")
+    config_sub = config_parser.add_subparsers(dest="config_action", metavar="action")
+
+    # config show
+    config_sub.add_parser("show", help="查看当前生效配置")
+
+    # config set
+    set_parser = config_sub.add_parser("set", help="设置配置项")
+    set_parser.add_argument("--api-key",         dest="api_key",         default=None, help="LLM API 密钥")
+    set_parser.add_argument("--llm-url",          dest="llm_url",         default=None, help="LLM API 地址（http/https）")
+    set_parser.add_argument("--model",            dest="model_name",      default=None, help="LLM 模型名")
+    set_parser.add_argument("--embedding-model",  dest="embedding_model", default=None, help="Embedding 模型名")
+    set_parser.add_argument("--ollama-url",       dest="ollama_base_url", default=None, help="Ollama 服务地址")
+    set_parser.add_argument("--ollama-model",     dest="ollama_model",    default=None, help="Ollama 模型名")
+
+    # config reset
+    config_sub.add_parser("reset", help="重置配置为 .env 默认值")
+
+    # config init
+    config_sub.add_parser("init", help="交互式引导配置（新用户首次使用）")
+
+    args = parser.parse_args()
+    base_url = args.base_url.rstrip("/")
+
+    # ── 路由：config 子命令 ──────────────────────────────────
+    if args.command == "config":
+        action = getattr(args, "config_action", None)
+        if action == "show":
+            _config_show(base_url)
+        elif action == "set":
+            _config_set(base_url, {
+                "api_key":         args.api_key,
+                "base_url":        getattr(args, "llm_url", None),
+                "model_name":      args.model_name,
+                "embedding_model": args.embedding_model,
+                "ollama_base_url": args.ollama_base_url,
+                "ollama_model":    args.ollama_model,
+            })
+        elif action == "reset":
+            _config_reset(base_url)
+        elif action == "init":
+            _config_init(base_url)
+        else:
+            config_parser.print_help()
+        return
+
+    # ── 默认：进入交互模式 ────────────────────────────────────
+    cli = GradCopilotCLI(base_url=base_url, initial_session=args.session)
     cli.run()
 
 

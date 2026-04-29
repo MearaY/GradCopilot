@@ -70,3 +70,5 @@ data/ollama/*
 .pytest_cache/
 
 .coverage
+
+config.local.json
