@@ -43,7 +43,7 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 DEFAULT_BASE_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
 CHAT_TIMEOUT = 120
 DEFAULT_TIMEOUT = 15
-SEARCH_TIMEOUT = 30
+SEARCH_TIMEOUT = 120
 
 # ── ANSI 颜色 ──────────────────────────────────────────────────
 _C = {
@@ -275,7 +275,10 @@ class GradCopilotCLI:
             return
 
         paper_ids = [self.search_results[i]["paper_id"] for i in indices]
-        titles = [self.search_results[i].get("title", paper_ids[i])[:50] for i in indices]
+        titles = [
+            self.search_results[i].get("title", pid)[:50]
+            for i, pid in zip(indices, paper_ids)
+        ]
         print(c("gray", f"  下载 {len(paper_ids)} 篇：{', '.join(titles)}"))
         print(c("gray", "  下载中（可能需要 1-3 分钟）…"))
 

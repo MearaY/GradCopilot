@@ -7,6 +7,7 @@ M-04：工具执行调度器。
 """
 import logging
 import re
+import json
 
 from src.modules.llm_client import call_llm
 
@@ -140,51 +141,103 @@ def _execute_rag(session_id: str, cleaned_input: str) -> dict:
 
 def _extract_search_params(text: str) -> dict:
     """
-    从自然语言输入中提取 arXiv 搜索结构化参数。
-
-    提取规则：
-      - max_results：匹配 "N篇" / "N papers"，默认 10
-      - start_date/end_date：匹配 20xx 年份，设为全年范围
-      - query：去掉数量、年份、中文指令词后的剩余关键词
+    使用 LLM 从自然语言输入中智能提取 arXiv 搜索结构化参数。
     """
-    # 数量提取
-    max_results = 10
-    num_match = re.search(r'(\d+)\s*篇', text)
-    if not num_match:
-        num_match = re.search(r'(\d+)\s*papers?', text, re.IGNORECASE)
-    if num_match:
-        max_results = max(1, min(int(num_match.group(1)), 50))
+    import json
+    from src.modules.llm_client import call_llm
 
-    # 年份提取：匹配 2000-2099
-    start_date, end_date = None, None
-    year_match = re.search(r'\b(20\d{2})\b', text)
-    if year_match:
-        year = year_match.group(1)
-        start_date = f"{year}-01-01"
-        end_date = f"{year}-12-31"
+    prompt = f"""
+请从以下用户输入中提取 arXiv 论文搜索的参数，并以纯 JSON 格式返回。
 
-    # 关键词提取：剔除数量、年份、中文指令词
-    query = text
-    query = re.sub(r'\d+\s*篇', '', query)
-    query = re.sub(r'\b20\d{2}\b\s*年?', '', query)
-    query = re.sub(
-        r'(检索|搜索|查找|找|关于|的|论文|帮我|请|需要|想要|paper|papers?)',
-        ' ', query, flags=re.IGNORECASE
-    )
-    query = ' '.join(query.split()).strip()
-    if not query:
-        query = text  # 兼底：还原原始输入
+需要提取的字段：
+- max_results: 整数，提取用户要求的论文数量（例如"5篇"提取为 5），如果没有指定则默认为 10。最大不超过 50。
+- start_date: 字符串，起始日期（如 "YYYY-MM-DD"）。如果用户只指定了年份（例如"2026年"），请将其转换为该年的 1 月 1 日，即 "2026-01-01"。如果没有指定则为 null。
+- end_date: 字符串，结束日期（如 "YYYY-MM-DD"）。如果用户只指定了年份（例如"2026年"），请将其转换为该年的 12 月 31 日，即 "2026-12-31"。如果没有指定则为 null。
+- query: 字符串，去除了数量、年份、指示性动词（如"搜索"、"查找"、"帮我找"、"论文"等）后的核心检索词。例如输入"检索2026年2篇agent论文"，query 应为 "agent"。
 
-    logger.info(
-        f"_extract_search_params: query={query!r} max={max_results} "
-        f"start={start_date} end={end_date}"
-    )
-    return {
-        "query": query,
-        "max_results": max_results,
-        "start_date": start_date,
-        "end_date": end_date,
-    }
+用户输入：
+"{text}"
+
+只返回一段有效的 JSON，不要输出任何额外的说明文字或 Markdown 标记（不要用 ```json 包裹）。例如：
+{{
+  "max_results": 2,
+  "start_date": "2026-01-01",
+  "end_date": "2026-12-31",
+  "query": "agent"
+}}
+"""
+    try:
+        resp = call_llm(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            event="extract_search_params"
+        )
+        content = resp["content"].strip()
+        
+        # 移除 Markdown 代码块标记（防御性处理）
+        if content.startswith("```"):
+            lines = content.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            content = "\n".join(lines).strip()
+            
+        params = json.loads(content)
+        
+        max_results = max(1, min(int(params.get("max_results") or 10), 50))
+        start_date = params.get("start_date")
+        end_date = params.get("end_date")
+        query = (params.get("query") or text).strip()
+        if not query:
+            query = text
+
+        logger.info(
+            f"_extract_search_params (LLM): query={query!r} max={max_results} "
+            f"start={start_date} end={end_date}"
+        )
+        return {
+            "query": query,
+            "max_results": max_results,
+            "start_date": start_date,
+            "end_date": end_date,
+        }
+    except Exception as e:
+        logger.error(f"_extract_search_params LLM 提取失败: {e}，回退到原始文本")
+        return {
+            "query": text,
+            "max_results": 10,
+            "start_date": None,
+            "end_date": None,
+        }
+
+def _extract_download_params(text: str, history: list[dict]) -> str:
+    """
+    提取用户想要下载的 arXiv 论文 ID。
+    """
+    prompt = f"""
+你是一个参数提取器。你需要从用户的输入以及对话历史中，提取出用户想要下载的 arXiv 论文的 ID（paper_id）。
+如果有多个 ID，请用逗号分隔。不要输出任何额外的说明或标记，只需返回 ID 即可。
+
+对话历史概要：
+{json.dumps(history[-3:] if history else [], ensure_ascii=False)}
+
+用户当前输入：
+"{text}"
+
+只返回论文 ID，例如：2601.17768, 2604.03350
+"""
+    try:
+        resp = call_llm(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            event="extract_download_params"
+        )
+        return resp["content"].strip()
+    except Exception as e:
+        logger.error(f"_extract_download_params LLM 提取失败: {e}，回退到原始文本")
+        return text
+
 
 
 def _execute_tool(session_id: str, tool_name: str, cleaned_input: str) -> dict:
@@ -194,16 +247,35 @@ def _execute_tool(session_id: str, tool_name: str, cleaned_input: str) -> dict:
     """
     try:
         if tool_name == "arxiv_search_tool":
-            from src.tools.search_tool import run as search_run
             params = _extract_search_params(cleaned_input)
-            result = search_run(
-                query=params["query"],
-                session_id=session_id,
-                max_results=params["max_results"],
-                start_date=params["start_date"],
-                end_date=params["end_date"],
-            )
-            raw = f"找到 {len(result.get('papers', []))} 篇论文"
+            try:
+                from src.tools.mcp_arxiv_tool import search as mcp_search
+                result = mcp_search(
+                    query=params["query"],
+                    session_id=session_id,
+                    max_results=params["max_results"],
+                    start_date=params["start_date"],
+                    end_date=params["end_date"],
+                )
+                logger.info(f"AgentExecutor: MCP arxiv search 成功 session={session_id}")
+            except Exception as mcp_err:
+                logger.warning(
+                    f"AgentExecutor: MCP search 失败，fallback 到旧工具 "
+                    f"session={session_id} error={mcp_err}"
+                )
+                from src.tools.search_tool import run as search_run
+                result = search_run(
+                    query=params["query"],
+                    session_id=session_id,
+                    max_results=params["max_results"],
+                    start_date=params["start_date"],
+                    end_date=params["end_date"],
+                )
+            papers = result.get('papers', [])
+            raw = f"找到 {len(papers)} 篇论文"
+            if papers:
+                details = [f"- {p.get('title', '未知')} (ID: {p.get('paper_id', '未知')})" for p in papers[:10]]
+                raw += "：\n" + "\n".join(details)
             return {
                 "tool_result": result,
                 "raw_response": raw,
@@ -212,18 +284,66 @@ def _execute_tool(session_id: str, tool_name: str, cleaned_input: str) -> dict:
             }
 
         if tool_name == "paper_download_tool":
-            from src.tools.download_tool import run as download_run
-            from src.modules.session_memory import set_context
-            result = download_run(query=cleaned_input, session_id=session_id)
+            from src.modules.session_memory import set_context, get_history, get_context
+            history = get_history(session_id)
+            query = _extract_download_params(cleaned_input, history)
+            try:
+                from src.tools.mcp_arxiv_tool import download as mcp_download
+                result = mcp_download(query=query, session_id=session_id)
+                logger.info(f"AgentExecutor: MCP arxiv download 成功 session={session_id}")
+            except Exception as mcp_err:
+                logger.warning(
+                    f"AgentExecutor: MCP download 失败，fallback 到旧工具 "
+                    f"session={session_id} error={mcp_err}"
+                )
+                from src.tools.download_tool import run as download_run
+                result = download_run(query=query, session_id=session_id)
             downloaded = result.get("downloaded", [])
             failed = result.get("failed", [])
+
             # 写入情景上下文：记录本次下载的论文 ID，供后续 RAG 限定检索范围
             if downloaded:
                 set_context(session_id, {
                     "last_action": "paper_download",
                     "downloaded_papers": downloaded,
                 })
-            raw = f"下载成功 {len(downloaded)} 篇，失败 {len(failed)} 篇"
+
+            # 构建下载阶段摘要
+            raw = f"📥 论文下载完成：成功 {len(downloaded)} 篇，失败 {len(failed)} 篇。"
+            if downloaded:
+                raw += f"\n  ✅ 已下载：{', '.join(downloaded)}"
+            if failed:
+                raw += f"\n  ❌ 下载失败：{', '.join(failed)}"
+
+            # 下载成功后自动构建/更新向量知识库
+            if downloaded:
+                logger.info(
+                    f"AgentExecutor: 下载完成，自动触发知识库构建 session={session_id}"
+                )
+                raw += "\n\n🔨 正在自动构建向量知识库，请稍候..."
+                try:
+                    from src.tools.build_knowledge_tool import run as build_run
+                    build_result = build_run(session_id=session_id)
+                    chunks = build_result.get("chunks_indexed", 0)
+                    # 保留 downloaded_papers 上下文，更新 last_action
+                    prev_ctx = get_context(session_id)
+                    new_ctx = {
+                        "last_action": "build_knowledge",
+                        "chunks_indexed": chunks,
+                    }
+                    if prev_ctx.get("downloaded_papers"):
+                        new_ctx["downloaded_papers"] = prev_ctx["downloaded_papers"]
+                    set_context(session_id, new_ctx)
+                    raw += f"\n✅ 知识库构建完成，已索引 {chunks} 个片段。现在可以直接提问了！"
+                    logger.info(
+                        f"AgentExecutor: 知识库自动构建完成 chunks={chunks} session={session_id}"
+                    )
+                except Exception as build_err:
+                    logger.error(
+                        f"AgentExecutor: 知识库自动构建失败 session={session_id} error={build_err}"
+                    )
+                    raw += f"\n⚠️ 知识库构建失败：{build_err}。请手动执行 /build 命令。"
+
             return {
                 "tool_result": result,
                 "raw_response": raw,
