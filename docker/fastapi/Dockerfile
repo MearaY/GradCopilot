@@ -21,8 +21,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 复制依赖定义文件
 COPY requirements.txt /app/
 
-# 安装 Python 依赖，禁止缓存以减小镜像体积
+# 安装 Python 依赖（包含 uv 和 mcp），禁止缓存以减小镜像体积
 RUN pip install --no-cache-dir -r requirements.txt
+
+# 预缓存 arxiv-mcp-server，避免运行时首次调用走网络安装
+# uvx --install-only 会把工具下载并缓存到 UV 工具目录，后续调用无需联网
+RUN uvx --install-only arxiv-mcp-server || true
 
 # 复制项目源代码
 COPY src/ /app/src/

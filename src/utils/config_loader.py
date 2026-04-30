@@ -126,12 +126,10 @@ def set(updates: dict) -> None:
             else:
                 current[k] = str(v)
 
-        tmp_path = CONFIG_LOCAL_PATH.with_suffix(".json.tmp")
-        tmp_path.write_text(
+        CONFIG_LOCAL_PATH.write_text(
             json.dumps(current, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
-        os.replace(tmp_path, CONFIG_LOCAL_PATH)  # 原子替换
 
     if _USE_FILELOCK:
         with FileLock(_LOCK_PATH):

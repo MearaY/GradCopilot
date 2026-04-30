@@ -43,6 +43,7 @@
 本项目严格按照模块化、分层架构进行开发，充分展现了 AI 应用的工程落地能力：
 
 - **智能大脑与路由 (Agent Routing)**：放弃无脑检索，利用 LangChain 构造零样本意图分类器。识别出 5 类核心意图（RAG问答 / arXiv搜索 / PDF下载 / 入库向量化 / 闲聊）后，执行严格的分流路由。
+- **MCP 工具集成 (MCP Integration)**：集成 [arxiv-mcp-server](https://github.com/blazickjp/arxiv-mcp-server)，通过 Model Context Protocol (MCP) 实现稳定、标准化的 arXiv 论文搜索与解析，支持 HTML 优先下载及 PDF 回退机制。
 - **底层依赖设施 (Infrastructure)**：
   - **Redis**：毫秒级实现多会话 (Session) 短期记忆流存取，严格保障各 Session 绝对隔离。
   - **PostgreSQL + pgvector**：彻底取代本地 FAISS 文件存储，利用强大的高维稠密向量计算，支持海量 PDF 切片的持久化。
@@ -95,7 +96,7 @@ docker-compose up -d
 ```
 *执行后将启动：Redis (6379)、Postgres+pgvector (5432)、Ollama (11434)。*
 
-![phase2-docker-start](./assets/phase2-docker-start.png)
+![docker-start](./assets/docker-start.png)
 
 > docker常用指令：
 >
@@ -199,7 +200,7 @@ docker compose down
 docker compose -f docker-compose.infra.yml down
 ```
 
-![phase2-Web-UI](./assets/phase2-Web-UI.png)
+![Web-UI](./assets/Web-UI.png)
 
 ## 工程运行演示
 
@@ -208,31 +209,40 @@ docker compose -f docker-compose.infra.yml down
 
 **通过 /help 查看支持命令**
 
-![phase2-CLI-help](./assets/phase2-CLI-help.png)
+![CLI-help](./assets/CLI-help.png)
 
 **通过 /session 查看会话列表**
 
-![phase2-CLI-session](./assets/phase2-CLI-session.png)
+![CLI-session](./assets/CLI-session.png)
 
 **切换会话 & 查看历史消息**
 
-![phase2-CLI-switch-history](./assets/phase2-CLI-switch-history.png)
+![CLI-switch-history](./assets/CLI-switch-history.png)
 
 **检索论文**
 
-![phase2-CLI-search](./assets/phase2-CLI-search.png)
+- **手动模式**：通过 `/search [关键词]` 命令直接精确检索。
+- **自动模式**：Agent 智能识别自然语言意图（如：`检索2026年2篇关于mcp的论文`），自动提取日期、数量与核心关键词并执行搜索。
+
+![CLI-search](./assets/CLI-search.png)
+
+![CLI-search-auto](./assets/CLI-search-auto.png)
 
 **下载论文**
 
-![phase-2-CLI-download](./assets/phase-2-CLI-download.png)
+- **手动模式**：通过 `/download [序号]` 命令下载搜索结果中的特定论文。
 
-**日常操作**
+  ![CLI-download](./assets/CLI-download.png)
 
-![phase2-CLI-chat](./assets/phase2-CLI-chat.png)
+- **自动模式**：Agent 识别上下文指代（如：`下载论文1`），精准映射 arXiv ID。下载完成后，系统将自动触发知识库构建流程。
 
-**意图识别**
+  > 注：这里的“论文1”是由 Agent 根据检索返回列表自动映射的。
 
-![phase2-CLI-rag](./assets/phase2-CLI-rag.png)
+  ![CLI-download-auto](./assets/CLI-download-auto.png)
+
+**论文提问**
+
+![CLI-chat](./assets/CLI-chat.png)
 
 ### 🌐 Streamlit Web 可视化页面
 
@@ -240,17 +250,30 @@ docker compose -f docker-compose.infra.yml down
 
 **知识库管理**
 
-![phase2-Web-UI-知识库](./assets/phase2-Web-UI-知识库.png)
+![Web-UI-知识库](./assets/Web-UI-知识库.png)
 
 **主对话界面**  
 
-![phase2-Web-UI-对话界面](./assets/phase2-Web-UI-对话界面.png)
+![Web-UI-对话界面](./assets/Web-UI-对话界面.png)
 
-**论文检索**
+**论文检索与自动化流**
 
-![phase2-Web-UI-论文检索](./assets/phase2-Web-UI-论文检索.png)
+- **手动检索**：在专用搜索面板中输入关键词，直观浏览检索结果。
 
+  ![Web-UI-论文检索](./assets/Web-UI-论文检索.png)
+- **自动化全链路**：只需在对话框输入自然语言需求，Agent 即可自动进行文献检索、PDF 下载、知识库构建，并可以进行针对性的论文对话。
 
+  ![Web-UI-search](./assets/Web-UI-search.png)
+
+  ![Web-UI-download](./assets/Web-UI-download.png)
+
+  ![Web-UI-chat](./assets/Web-UI-chat.png)
+
+## 🙏 致谢
+
+本项目在开发过程中参考并集成了以下优秀开源项目：
+
+- **[arxiv-mcp-server](https://github.com/blazickjp/arxiv-mcp-server)**：提供了强大的 arXiv MCP 接口支持，极大提升了论文检索与解析的效率。
 
 ## 📄 许可证
 

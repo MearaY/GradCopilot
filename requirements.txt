@@ -22,6 +22,9 @@ pymupdf==1.27.2.2
 # arXiv Search
 arxiv==2.4.1
 
+# MCP (Model Context Protocol) Client
+mcp>=1.0.0
+
 # Environment Variables
 python-dotenv==1.2.1
 
@@ -37,3 +40,5 @@ pgvector                      # pgvector Python 绑定（VECTOR 类型支持）
 # ── Testing ────────────────────────────────────────
 pytest>=8.0.0
 pytest-mock>=3.0.0
+
+uv==0.11.8

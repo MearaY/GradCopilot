@@ -359,17 +359,33 @@ async def get_session_history(session_id: str, limit: int = 20):
 
 @app.post("/api/papers/search")
 async def search_papers(req: SearchRequest):
-    """搜索 arXiv 论文。"""
+    """搜索 arXiv 论文（优先走 MCP，失败 fallback 到旧工具）。"""
     try:
-        from src.tools.search_tool import run as search_run
-        result = search_run(
-            query=req.query,
-            session_id=req.session_id,
-            max_results=req.max_results,
-            start_date=req.start_date,
-            end_date=req.end_date,
-        )
-        return result
+        tool_source = "mcp"
+        try:
+            from src.tools.mcp_arxiv_tool import search as mcp_search
+            result = await asyncio.to_thread(
+                mcp_search,
+                req.query,
+                req.session_id,
+                req.max_results,
+                req.start_date,
+                req.end_date,
+            )
+            logger.info(f"API /papers/search: MCP 成功 session={req.session_id}")
+        except Exception as mcp_err:
+            tool_source = "legacy"
+            logger.warning(f"API /papers/search: MCP 失败，fallback session={req.session_id} error={mcp_err}")
+            from src.tools.search_tool import run as search_run
+            result = await asyncio.to_thread(
+                search_run,
+                req.query,
+                req.session_id,
+                req.max_results,
+                req.start_date,
+                req.end_date,
+            )
+        return {**result, "tool_source": tool_source}
     except Exception as e:
         logger.error(f"search_papers 失败: {e}")
         _error_response(ErrorCode.TOOL_ERROR, str(e), 500)
@@ -381,14 +397,20 @@ async def search_papers(req: SearchRequest):
 
 @app.post("/api/papers/download")
 async def download_papers(req: DownloadRequest):
-    """下载论文 PDF。"""
+    """下载论文 PDF（优先走 MCP，失败 fallback 到旧工具）。"""
     try:
-        from src.tools.download_tool import download_by_ids
         from src.modules.session_memory import set_context
-        result = download_by_ids(
-            paper_ids=req.paper_ids,
-            session_id=req.session_id,
-        )
+        query = " ".join(req.paper_ids)
+        tool_source = "mcp"
+        try:
+            from src.tools.mcp_arxiv_tool import download as mcp_download
+            result = await asyncio.to_thread(mcp_download, query, req.session_id)
+            logger.info(f"API /papers/download: MCP 成功 session={req.session_id}")
+        except Exception as mcp_err:
+            tool_source = "legacy"
+            logger.warning(f"API /papers/download: MCP 失败，fallback session={req.session_id} error={mcp_err}")
+            from src.tools.download_tool import download_by_ids
+            result = await asyncio.to_thread(download_by_ids, req.paper_ids, req.session_id)
         # 写入情景上下文：记录本次下载的论文 ID，供后续 RAG 限定检索范围
         downloaded = result.get("downloaded", [])
         if downloaded:
@@ -396,7 +418,7 @@ async def download_papers(req: DownloadRequest):
                 "last_action": "paper_download",
                 "downloaded_papers": downloaded,
             })
-        return result
+        return {**result, "tool_source": tool_source}
     except Exception as e:
         logger.error(f"download_papers 失败: {e}")
         _error_response(ErrorCode.TOOL_ERROR, str(e), 500)
